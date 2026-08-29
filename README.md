@@ -6,6 +6,32 @@ It merges two rule sets. The shape rules (answer first, numbered steps, one name
 
 [`ADHD-STE.md`](ADHD-STE.md) is the entire config. Installing means putting that one file where your harness reads global instructions. Full rules and attribution are inside it.
 
+## Quick start
+
+Claude Code, three lines:
+
+```bash
+mkdir -p ~/.claude
+curl -fsSL https://raw.githubusercontent.com/ookla-ariel-ride/adhd-ste/main/ADHD-STE.md -o ~/.claude/ADHD-STE.md
+grep -qxF '@ADHD-STE.md' ~/.claude/CLAUDE.md 2>/dev/null || printf '\n@ADHD-STE.md\n' >> ~/.claude/CLAUDE.md
+```
+
+Start a new session. Codex and opencode put the same file somewhere else; see [Config per harness](#config-per-harness). Or skip the terminal and [let your agent install it](#install-with-your-agent).
+
+## What the rules say
+
+The file has two halves. The shape half tells the agent how to structure an answer:
+
+- Lead with the next action or the result. If the answer is a command, it goes on line one.
+- Number multi-step work, one bounded action per step, and cap lists at five items.
+- End with one concrete next action the reader can do in under two minutes.
+- Restate state every turn ("Step 3 of 5 done"), give time estimates in real units, keep errors matter-of-fact.
+- No preamble, no recap, no "hope this helps."
+
+The language half tells it how to write each sentence: one meaning per word, one verb per action (always "check", never "verify"), active voice, simple tenses, 20 words or fewer per instruction, one instruction per sentence.
+
+There is an exceptions list (explain fully when asked, confirm before destructive actions, stop and ask after three failed fix attempts) and a pre-send check. Say "normal mode" in a session to relax all of it.
+
 ## What it changes
 
 The same question, "My tests fail with ModuleNotFoundError: No module named requests", asked in real sessions.
@@ -91,13 +117,15 @@ Open a terminal and run the commands above for your harness. Review `~/.claude/A
 
 ## Other harnesses
 
-Only Claude Code, Codex, and opencode are tested. Other agents (Cursor, Gemini CLI, Copilot CLI, and the rest) each load global instructions from their own location. The same approach should work: download `ADHD-STE.md` and register it through that agent's instruction mechanism. Expect to consult that agent's docs, and check the result with a fresh session before trusting it.
+Only Claude Code, Codex, and opencode are tested. Other agents (Cursor, Gemini CLI, Copilot CLI, and the rest) each load global instructions from their own location. The same approach should work: download `ADHD-STE.md` and register it through that agent's instruction mechanism. Expect to consult that agent's docs, and run the check below in a fresh session before trusting it.
 
-To check any install, start a new session and ask:
+## Check the install
+
+Start a new session and ask:
 
 > According to the global instruction file, what exact phrase relaxes the output style for the current session? Reply with only that phrase.
 
-The answer should be `normal mode`.
+The answer should be `normal mode`. If the agent answers anything else, the file is not loading: check the path, the import line, and that you started a fresh session.
 
 ## Turn it off
 
@@ -117,12 +145,18 @@ scripts/summarize.py        turns the run output into the results table
 
 ## Reproduce the test
 
-Requires the `claude` CLI, `jq`, and Python 3. The script swaps your `~/.claude/CLAUDE.md` between runs and restores it on exit, so close other Claude Code sessions first.
+Requires the `claude` CLI, `jq`, and Python 3, with the config already installed for Claude Code. The script swaps your `~/.claude/CLAUDE.md` between cells and restores it on exit, so close other Claude Code sessions first.
 
 ```bash
 scripts/run-matrix.sh 3          # 3 replicates per cell, 12 runs, roughly $8 and 10 minutes
 python3 scripts/summarize.py runs/
 ```
+
+To test a different prompt, edit `scripts/prompt.txt`.
+
+## Contributing
+
+Changes to the rules go in `ADHD-STE.md`. Keep the attribution block at the top, and keep each rule traceable to one of the two upstream sources or mark it as new. If you change a rule, rerun the test and update `results/RESULTS.md`.
 
 ## License
 
