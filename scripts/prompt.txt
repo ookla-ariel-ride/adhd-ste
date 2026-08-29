@@ -1,0 +1,1 @@
+My Node.js API on Kubernetes started returning intermittent 502 errors after I enabled PostgreSQL connection pooling. Pod memory rises until Kubernetes restarts the pod. Readiness stays green, logs show ECONNRESET, and deployments overlap old and new pods. I have no staging environment. Give me a safe diagnosis plan, the most likely causes, and fixes I can apply without downtime.

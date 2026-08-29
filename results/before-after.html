@@ -1,0 +1,108 @@
+<title>Before vs After</title>
+<style>
+  body { background:#1e1e1e; color:#ddd; font-family:-apple-system,sans-serif; margin:0; padding:16px; }
+  .meta { text-align:center; color:#999; margin-bottom:12px; font-size:13px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  .col h2 { font-size:15px; margin:0 0 8px; padding:8px 12px; border-radius:6px 6px 0 0; }
+  .before h2 { background:#5a3d3d; } .after h2 { background:#3d5a41; }
+  pre { white-space:pre-wrap; overflow-wrap:break-word; font:12.5px/1.5 ui-monospace,monospace;
+        background:#252526; padding:12px; margin:0; border-radius:0 0 6px 6px; }
+  @media (max-width:900px) { .cols { grid-template-columns:1fr; } }
+  .prompt { margin:0 0 16px; }
+  .prompt h2 { font-size:15px; margin:0 0 8px; padding:8px 12px; border-radius:6px 6px 0 0; background:#3d4b5a; }
+  .prompt pre { border-radius:0 0 6px 6px; }
+</style>
+<div class="prompt"><h2>Prompt</h2><pre>My Node.js API on Kubernetes started returning intermittent 502 errors after I enabled PostgreSQL connection pooling. Pod memory rises until Kubernetes restarts the pod. Readiness stays green, logs show ECONNRESET, and deployments overlap old and new pods. I have no staging environment. Give me a safe diagnosis plan, the most likely causes, and fixes I can apply without downtime.</pre></div>
+<div class="meta">Same prompt, fresh sessions, claude-fable-5. Only variable: the @ADHD-STE.md import.</div>
+<div class="cols">
+  <div class="col before"><h2>Before &mdash; no ADHD-STE &middot; 734 words</h2><pre>**Most likely story:** enabling pooling introduced two classic `pg.Pool` bugs at once — clients that are never released (or a new pool created per request), which makes the pool/queue grow until OOM, and no `pool.on(&#x27;error&#x27;)` handler, so when Postgres or a proxy kills an idle pooled connection you get an unhandled `ECONNRESET` that crashes the process mid-request → 502s. Readiness stays green because your probe doesn&#x27;t touch the pool. The deploy-overlap 502s are a separate, common issue: no graceful shutdown plus Node&#x27;s `keepAliveTimeout` being shorter than the load balancer&#x27;s idle timeout.
+
+## Phase 1 — Evidence first (read-only, zero risk)
+
+1. **Restart reason:** `kubectl describe pod &lt;pod&gt;` → `Last State`. Exit code 137/`OOMKilled` = memory kill; exit code 1/`Error` = crash (points at the unhandled `&#x27;error&#x27;` event). This one fork decides half the diagnosis.
+2. **When do 502s happen?** Pull ingress/LB access logs and bucket 502 timestamps: clustered around rollouts → shutdown/keep-alive problem; steady-state → pool problem. They may be both.
+3. **Full ECONNRESET stack traces:** is it the pg client (DB side) or the HTTP server socket (LB side)? Different fixes.
+4. **Postgres side:** `SELECT state, count(*) FROM pg_stat_activity GROUP BY state;` sampled over time. Monotonically rising connection count = pool-per-request leak. Also check Postgres/pgbouncer/RDS-proxy logs for &quot;terminating connection&quot; and note any server-side idle timeout.
+5. **Read the diff that enabled pooling.** Check specifically: is `new Pool()` a module-level singleton? Is every `pool.connect()` paired with `client.release()` in a `finally`? Is there a `pool.on(&#x27;error&#x27;, ...)` handler? What are `max`, `idleTimeoutMillis`, `connectionTimeoutMillis`?
+6. **Config audit:** Node `server.keepAliveTimeout` vs LB idle timeout; readiness probe endpoint (does it exercise the pool?); `terminationGracePeriodSeconds`, preStop hook, SIGTERM handler.
+
+**Then one low-risk instrumentation deploy** (rolling, no downtime): log `pool.totalCount / idleCount / waitingCount` plus `process.memoryUsage()` every 30s. A steadily climbing `waitingCount` confirms leaked clients; climbing `totalCount` across restarts of the same pod confirms pool-per-request.
+
+## Likely causes, ranked
+
+1. **Leaked pool clients** — `pool.connect()` without `release()` on error paths. Pool exhausts, requests queue unboundedly (memory ↑), latency spikes, LB times out → 502.
+2. **No idle-client error handler** — pg&#x27;s pool emits `&#x27;error&#x27;` when a backing connection dies idle; unhandled, it kills the Node process. Matches ECONNRESET + restarts exactly.
+3. **Pool created per request** — leaks connections and memory; Postgres hits `max_connections` and starts resetting → ECONNRESET.
+4. **`idleTimeoutMillis` longer than a server/proxy/NAT idle timeout** — pool hands out already-dead sockets → ECONNRESET on next query.
+5. **Deploy 502s:** old pods get SIGTERM with no graceful drain, and/or `keepAliveTimeout` (Node default 5s) &lt; LB idle timeout (typically 60s), so the LB reuses a socket Node just closed.
+6. **Readiness probe too shallow** — a sick pod with an exhausted pool still passes `/healthz`, so it keeps receiving traffic.
+
+## Fixes (all deployable via rolling update, `maxUnavailable: 0`)
+
+```js
+// one module-level pool
+const pool = new Pool({
+  max: 10,                        // pods × max &lt; Postgres max_connections, with headroom
+  connectionTimeoutMillis: 5000,  // fail fast instead of queueing forever
+  idleTimeoutMillis: 30000,       // below any server/proxy idle kill
+});
+pool.on(&#x27;error&#x27;, (err) =&gt; log.warn(&#x27;idle client error&#x27;, err)); // stops the crashes
+
+// every checkout:
+const client = await pool.connect();
+try { /* queries */ } finally { client.release(); }
+// or just use pool.query() where you don&#x27;t need transactions — it auto-releases
+```
+
+Graceful shutdown + keep-alive:
+
+```js
+server.keepAliveTimeout = 65000;  // &gt; LB idle timeout (e.g. ALB 60s)
+server.headersTimeout = 66000;
+process.on(&#x27;SIGTERM&#x27;, async () =&gt; {
+  ready = false;                  // readiness probe now fails
+  server.close(async () =&gt; { await pool.end(); process.exit(0); });
+});
+```
+
+Deployment spec: add `lifecycle: { preStop: { exec: { command: [&quot;sleep&quot;, &quot;10&quot;] } } }` so endpoints propagate before SIGTERM, keep `terminationGracePeriodSeconds` above your slowest request, and make the readiness probe do a `SELECT 1` through the pool with a short timeout.
+
+## Rolling out safely without staging
+
+Ship one change at a time (the error handler + `release()` fix first — it&#x27;s the root cause candidate), watch for 30–60 min per change. For extra safety, canary: scale a second Deployment with the fixed image and the same service labels to 1 replica, compare its memory curve and 502 rate against the old pods, then promote. `kubectl rollout undo` is your instant rollback. Don&#x27;t raise the memory limit as a &quot;fix&quot; — it only delays the OOM kill and masks the leak; use it only as a stopgap if you need breathing room while shipping the real fix.
+</pre></div>
+  <div class="col after"><h2>After &mdash; with ADHD-STE &middot; 571 words (&minus;22%)</h2><pre>502s plus rising memory after a pooling change almost always means a connection leak or a pool-per-request bug, with keep-alive and shutdown mismatches adding the deploy-time 502s. Diagnose first; every step below is read-only and safe in production.
+
+## Diagnosis plan (about 30 minutes, no risk)
+
+1. Run `kubectl describe pod &lt;pod&gt;` on a restarted pod. Check `lastState.terminated.reason`. `OOMKilled` confirms the memory limit kills it, not the liveness probe.
+2. Read the ingress logs at three 502 timestamps. &quot;upstream prematurely closed connection&quot; points at keep-alive or shutdown. &quot;connect() failed&quot; points at a dead pod.
+3. Run this on Postgres every 5 minutes, three times: `SELECT state, count(*) FROM pg_stat_activity GROUP BY state;`. A count that only grows means a connection leak.
+4. Compare 502 timestamps with `kubectl rollout history` and pod restart times. 502s that cluster around deploys point at shutdown handling, not the pool.
+5. Read the pool code. Count how many times `new Pool(...)` runs. Check that every `pool.connect()` has `client.release()` in a `finally` block. Check that `pool.on(&#x27;error&#x27;, ...)` exists.
+
+## Most likely causes, ranked
+
+1. **A new `Pool` per request or per handler.** Each pool holds its own connections. Memory climbs, Postgres hits `max_connections` and resets sockets (ECONNRESET), and requests fail with 502. This matches &quot;started after I enabled pooling&quot; best.
+2. **Clients not released on error paths.** The pool runs out of clients. New requests queue in memory until the ingress times out with 502.
+3. **Idle-timeout mismatch.** Postgres, PgBouncer, or a cloud NAT closes idle connections. The pool then hands out a dead socket. The next query gets ECONNRESET.
+4. **Node keep-alive shorter than the ingress.** Node&#x27;s default `keepAliveTimeout` is 5 seconds. Most ingresses hold sockets for 60. Node closes a socket the ingress still trusts, and the ingress reports 502.
+5. **No graceful shutdown.** On SIGTERM the server dies with requests in flight. During the old/new pod overlap, the ingress still routes to the dying pod.
+
+Readiness stays green because the probe does not look at the pool. A pod can have zero free connections and still return 200.
+
+## Fixes (apply one per rolling deploy, in this order)
+
+Each deploys with zero downtime if you set `maxUnavailable: 0` and `maxSurge: 1` in the Deployment strategy. Keep `kubectl rollout undo deployment/&lt;name&gt;` ready. About 2 hours total.
+
+1. Make the pool a single module-level instance. Release every client in `finally`. Add `pool.on(&#x27;error&#x27;, () =&gt; {})` with logging — without it, one dead idle connection crashes the whole process.
+2. Set pool limits: `max` so that `replicas × max` stays under Postgres `max_connections`, `idleTimeoutMillis: 30000` (below the shortest server-side idle timeout), `connectionTimeoutMillis: 5000`.
+3. Set `server.keepAliveTimeout = 65000` and `server.headersTimeout = 66000` (above the ingress idle timeout, usually 60s).
+4. Add graceful shutdown: on SIGTERM call `server.close()`, then `pool.end()`, then exit. Add a preStop hook (`sleep 10`) and `terminationGracePeriodSeconds: 30` so the ingress drains before the process stops.
+5. After the leak is fixed, make readiness honest: fail the probe when `pool.waitingCount` stays above a threshold. Do not make readiness call the database directly — a short DB blip would then take every pod out at once.
+
+Do not raise the memory limit as a fix. It hides the leak and stretches the crash interval.
+
+Next: run step 1 of the diagnosis (`kubectl describe pod` on a restarted pod) and paste the `lastState` block plus one ingress 502 log line. That pins down which cause you have.
+</pre></div>
+</div>
