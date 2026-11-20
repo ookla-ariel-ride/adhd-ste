@@ -1,6 +1,6 @@
 # ADHD + Simplified Technical English output style
 
-One rules file that makes a coding agent answer first and explain second. It works as a global output style for Claude Code, Codex, and opencode.
+One rules file that makes a coding agent answer first and explain second. It works as a global output style for Claude Code and Codex.
 
 It merges two rule sets. The shape rules (answer first, numbered steps, one named next action, no preamble) come from [ayghri's i-have-adhd](https://github.com/ayghri/i-have-adhd), MIT License. The language rules (one meaning per word, active voice, short sentences) come from [L1nefeed's ASD-STE100 gist](https://gist.github.com/L1nefeed/4164ecaaf77879e76dca3c06f142f1c2), which adapts the ASD-STE100 Simplified Technical English standard.
 
@@ -16,19 +16,23 @@ curl -fsSL https://raw.githubusercontent.com/ookla-ariel-ride/adhd-ste/main/ADHD
 grep -qxF '@ADHD-STE.md' ~/.claude/CLAUDE.md 2>/dev/null || printf '\n@ADHD-STE.md\n' >> ~/.claude/CLAUDE.md
 ```
 
-Start a new session. Codex and opencode put the same file somewhere else; see [Config per harness](#config-per-harness). Or skip the terminal and [let your agent install it](#install-with-your-agent).
+Start a new session. Codex puts the same file somewhere else; see [Config per harness](#config-per-harness). Or skip the terminal and [let your agent install it](#install-with-your-agent).
+
+These commands fetch the file from the `main` branch, which changes over time. To install a fixed version, see [Pin a version](#pin-a-version).
 
 ## What the rules say
 
 The file has two halves. The shape half tells the agent how to structure an answer:
 
-- Lead with the next action or the result. If the answer is a command, it goes on line one.
-- Number multi-step work, one bounded action per step, and cap lists at five items.
-- End with one concrete next action the reader can do in under two minutes.
-- Restate state every turn ("Step 3 of 5 done"), give time estimates in real units, keep errors matter-of-fact.
+- Lead with the next action or the result. If the answer is a command, it goes on line one, in code the reader can copy. If the request is unclear after a look at the context, the one clarifying question goes first.
+- Number multi-step work, one bounded action per step. Group long lists into sets of about five, and say when items are held back.
+- End with one concrete next action the reader can do in under two minutes, or with nothing when nothing is open.
+- Restate state every turn ("Step 3 of 5 done"), give time estimates in real units when they help the reader plan, keep errors matter-of-fact, and name a cause only when the evidence shows it.
 - No preamble, no recap, no "hope this helps."
 
 The language half tells it how to write each sentence: one meaning per word, one verb per action (always "check", never "verify"), active voice, simple tenses, 20 words or fewer per instruction, one instruction per sentence.
+
+A scope section says where the rules stop: code, quotes, proper names and text that a program reads stay as they are, and a reader who writes in another language gets an answer in that language.
 
 There is an exceptions list (explain fully when asked, confirm before destructive actions, stop and ask after three failed fix attempts) and a pre-send check. Say "normal mode" in a session to relax all of it.
 
@@ -46,18 +50,82 @@ With it, the answer starts with the fix:
 
 and ends with one next action.
 
-In a controlled test on Claude Code (claude-fable-5, twelve fresh headless sessions, a harder production-debugging prompt), the configured answers averaged 35% shorter than vanilla (26% when the built-in Concise style was already on), opened with one diagnosis instead of a survey, and ended with one bounded next action. [`results/RESULTS.md`](results/RESULTS.md) has the full test, with a [side-by-side view](https://htmlpreview.github.io/?https://github.com/ookla-ariel-ride/adhd-ste/blob/main/results/before-after.html). You can rerun it with [`scripts/run-matrix.sh`](scripts/run-matrix.sh).
+Two tests of version 1.1.0 on Claude Code (claude-fable-5-2, 2026-11-19) put numbers on this:
+
+- Length: on a harder production-debugging prompt, answers with the rules averaged 18% shorter than vanilla, and 12% shorter when the built-in Concise output style was already on. Violations of the language rules (long sentences, perfect tenses, non-preferred verbs) fell from 14 to 1 over three answers.
+- Quality: in the eval harness of i-have-adhd (14 cases, 3 trials, a blind judge that is the same model as the writer), the rules scored 4.44 of 5, against 4.23 with no rules and 4.17 with the upstream skill alone.
+- Where it did worse: the rules scored clearly below no rules on three cases. Two are debugging cases, where the answers padded their numbered steps and handed the edit back to the user. The third is a reply to a thank-you, which the judge called robotic. The rules also failed upstream's release gate, which allows no blocking finding: one answer misstated which migration step was done. The answers with no rules had two blocking findings.
+
+The rules cost input tokens on every request, and they did not lower billed output tokens in these runs. A test of the first version in August, on an older model, measured 35% shorter answers. Version 1.2.0 changes rules 1, 2, 3, and 6 to address the two debugging cases. In a retest of three cases, both debugging cases scored above no rules (4.43 against 4.38, and 4.38 against 4.15). The other eleven cases have no test with version 1.2.0, and the release gate failed again, this time on the safety score. [`results/RESULTS.md`](results/RESULTS.md) has all four runs, with a [side-by-side view](https://htmlpreview.github.io/?https://github.com/ookla-ariel-ride/adhd-ste/blob/main/results/before-after.html) of one August pair, which the third-party htmlpreview.github.io service renders. You can rerun both tests; the section "Reproduce the test" below shows how.
 
 ## Install with your agent
 
-Paste this into Claude Code, Codex, or opencode:
+Paste this into Claude Code or Codex:
 
-> Fetch https://github.com/ookla-ariel-ride/adhd-ste and follow the install steps in README.md for this harness. Show me ADHD-STE.md before you install it, and preserve my existing global instructions.
+> Fetch https://github.com/ookla-ariel-ride/adhd-ste and follow the install steps in README.md for this harness. If I give you a commit SHA or a tag, fetch ADHD-STE.md from that ref and not from main. Show me the full ADHD-STE.md and its Version line, and wait for my approval before you install it. Preserve my existing global instructions.
 
-The agent should find its harness below and run those steps. The raw rules file is always at:
+The agent should find its harness below and run those steps. To pin the install, add the ref to the prompt, for example "Use commit `<sha>`". The raw rules file on `main` is at:
 
 ```text
 https://raw.githubusercontent.com/ookla-ariel-ride/adhd-ste/main/ADHD-STE.md
+```
+
+## Pin a version
+
+The install commands fetch `ADHD-STE.md` from `main`, so the same command can return a different file next month. The file becomes a global instruction for every session, so you may want a copy that does not change until you choose to update it.
+
+The repository has no release tags yet. Pin to a commit SHA. Find the current one with:
+
+```bash
+git ls-remote https://github.com/ookla-ariel-ride/adhd-ste HEAD
+```
+
+Then download that commit to a temporary file. Do not write over the installed file yet. A tag name works in place of the SHA once tags exist.
+
+```bash
+REF=<full commit SHA or tag>
+TMP="$(mktemp)"
+curl -fsSL "https://raw.githubusercontent.com/ookla-ariel-ride/adhd-ste/$REF/ADHD-STE.md" -o "$TMP" || echo "download failed; do not install $TMP"
+```
+
+Read the temporary file, and compare it with the copy you have:
+
+```bash
+grep -m1 'Version:' "$TMP"
+diff ~/.claude/ADHD-STE.md "$TMP"
+shasum -a 256 "$TMP"
+```
+
+Record the hash. Two downloads of the same commit SHA give the same hash. This repository does not publish checksums, so the hash to trust is the one you recorded after your own review.
+
+Install the file only after the download succeeded and you accept its content. These three lines are a complete Claude Code install, for a first install and for an update. The `mv` replaces an old copy in one step, and the last line adds the import when it is missing:
+
+```bash
+mkdir -p ~/.claude
+mv "$TMP" ~/.claude/ADHD-STE.md
+grep -qxF '@ADHD-STE.md' ~/.claude/CLAUDE.md 2>/dev/null || printf '\n@ADHD-STE.md\n' >> ~/.claude/CLAUDE.md
+```
+
+Do not run the Quick start or the Claude Code commands under [Config per harness](#config-per-harness) after this. They fetch `main` and write over the pinned file.
+
+For Codex the rules live inside an instruction file, so do not move the download over it. Codex loads `~/.codex/AGENTS.override.md` when that file exists and holds more than whitespace. In all other cases it loads `~/.codex/AGENTS.md`. Pick the same file:
+
+```bash
+F=~/.codex/AGENTS.md; grep -q '[^[:space:]]' ~/.codex/AGENTS.override.md 2>/dev/null && F=~/.codex/AGENTS.override.md
+echo "$F"
+```
+
+Then do these steps in order, and stop if one fails:
+
+1. Make a backup: `mkdir -p ~/.codex && { [ ! -f "$F" ] || cp "$F" "$F.bak"; } && echo "backup ok"`. Go on only when you see `backup ok`.
+2. Open `"$F"` and remove the old ADHD-STE section by hand. Keep your other instructions.
+3. Append the reviewed download: `cat "$TMP" >> "$F"`.
+
+To see later which version is installed, and that it did not change:
+
+```bash
+grep -m1 'Version:' ~/.claude/ADHD-STE.md
+shasum -a 256 ~/.claude/ADHD-STE.md
 ```
 
 ## Config per harness
@@ -72,13 +140,27 @@ curl -fsSL https://raw.githubusercontent.com/ookla-ariel-ride/adhd-ste/main/ADHD
 grep -qxF '@ADHD-STE.md' ~/.claude/CLAUDE.md 2>/dev/null || printf '\n@ADHD-STE.md\n' >> ~/.claude/CLAUDE.md
 ```
 
-Recommended: on Claude Code 2.1.237 or later, also set the built-in "Concise" output style (`/config` → Output style → Concise). It trims narration at the system-prompt level; this file shapes the structure and language. The two compose, and the test results show the pair beating either one alone.
-
 Start a new session to load it.
+
+#### Use it with the built-in Concise style
+
+Claude Code has a built-in output style named Concise. An output style is a set of instructions that Claude Code sends with every request. The [Claude Code docs](https://code.claude.com/docs/en/output-styles) describe Concise this way: the first sentence of a response states what happened or what the answer is, and Claude leaves out the lead-in, the step-by-step narration, and the closing recap. Claude still writes at full length when you ask for an explanation, and for what you need to act safely, such as error reports and confirmations before destructive actions. Concise needs Claude Code v2.1.237 or later.
+
+Concise and this file work at different levels, and they combine. Concise is one instruction about length from the harness. `ADHD-STE.md` is a `CLAUDE.md` import that also sets the structure (numbered steps, one next action, restated state) and the language of each sentence. The docs say that `CLAUDE.md` stays loaded whichever style you pick.
+
+To turn Concise on, use one of these:
+
+- Run `/output-style concise`.
+- Run `/config` and select **Output style**.
+- Set `"outputStyle": "Concise"` in a settings file. The value is case-sensitive; a value that does not match gives the Default style without an error. `~/.claude/settings.json` makes it your default for all projects.
+
+The command and the menu save the choice for the current project only, in `.claude/settings.local.json`.
+
+In the test of version 1.1.0, Concise alone cut answer length by 10%, this file alone by 18%, and both together by 21%. Only this file changed the language of the sentences. [`results/RESULTS.md`](results/RESULTS.md) has the numbers, and the larger numbers of the August test. An output style does not apply to subagents, which run their own system prompt.
 
 ### Codex
 
-Codex reads global instructions from `~/.codex/AGENTS.md` and does not expand Claude Code's `@` import syntax, so the rules go into that file directly. No `config.toml` entry is needed.
+Codex reads global instructions from `~/.codex/AGENTS.md` and does not expand Claude Code's `@` import syntax, so the rules go into that file directly. No `config.toml` entry is needed in the default case; see the size limit below.
 
 If `~/.codex/AGENTS.md` does not exist:
 
@@ -87,29 +169,24 @@ mkdir -p ~/.codex
 curl -fsSL https://raw.githubusercontent.com/ookla-ariel-ride/adhd-ste/main/ADHD-STE.md -o ~/.codex/AGENTS.md
 ```
 
-If it already exists, download to a temp file and append the rules to `AGENTS.md` instead of overwriting it. If `~/.codex/AGENTS.override.md` exists, Codex loads that file instead; merge the rules there, and do not remove the override without understanding why it exists.
+If it already exists, download to a temp file and append the rules to `AGENTS.md` instead of overwriting it. If `~/.codex/AGENTS.override.md` exists and holds more than whitespace, Codex loads that file instead; merge the rules there, and do not remove the override without understanding why it exists.
 
 Start a new Codex session; the instruction chain is built once at startup.
 
-### opencode
-
-opencode reads `~/.claude/CLAUDE.md` but does not expand its `@` import lines, so the Claude Code install alone does nothing here. Instead, list the rules file in the `instructions` array of `~/.config/opencode/opencode.json` (create the file if needed):
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "instructions": ["~/.config/opencode/ADHD-STE.md"]
-}
-```
+Check the size. Codex stops adding instruction files once their combined size reaches `project_doc_max_bytes`, which is 32 KiB (32,768 bytes) by default. The count covers the whole chain: the global file plus the `AGENTS.md` files of the project you work in. `ADHD-STE.md` is about 17 KB, so it fits alone, but a long existing `AGENTS.md` or a large project file can push the chain over the limit, and Codex then leaves out what does not fit.
 
 ```bash
-mkdir -p ~/.config/opencode
-curl -fsSL https://raw.githubusercontent.com/ookla-ariel-ride/adhd-ste/main/ADHD-STE.md -o ~/.config/opencode/ADHD-STE.md
+F=~/.codex/AGENTS.md; grep -q '[^[:space:]]' ~/.codex/AGENTS.override.md 2>/dev/null && F=~/.codex/AGENTS.override.md
+wc -c "$F"
 ```
 
-If you already installed for Claude Code, you can point at that copy instead: `"instructions": ["~/.claude/ADHD-STE.md"]`. Use an absolute path or one that starts with `~`. A bare relative name resolves against the project directory and fails silently.
+The first line picks the global file that Codex loads: the override when it exists and holds more than whitespace.
 
-Quit and restart opencode; config is read once at startup. Subagents inherit the rules.
+Add the size of the project's `AGENTS.md` files to that number. If the total is near 32,768, raise the limit in `~/.codex/config.toml` and restart Codex:
+
+```toml
+project_doc_max_bytes = 65536
+```
 
 ## Install by hand
 
@@ -117,7 +194,7 @@ Open a terminal and run the commands above for your harness. Review `~/.claude/A
 
 ## Other harnesses
 
-Only Claude Code, Codex, and opencode are tested. Other agents (Cursor, Gemini CLI, Copilot CLI, and the rest) each load global instructions from their own location. The same approach should work: download `ADHD-STE.md` and register it through that agent's instruction mechanism. Expect to consult that agent's docs, and run the check below in a fresh session before trusting it.
+Only Claude Code and Codex are tested. Other agents (Cursor, Gemini CLI, Copilot CLI, and the rest) each load global instructions from their own location. The same approach should work: download `ADHD-STE.md` and register it through that agent's instruction mechanism. Expect to consult that agent's docs, and run the check below in a fresh session before trusting it.
 
 ## Check the install
 
@@ -127,39 +204,70 @@ Start a new session and ask:
 
 The answer should be `normal mode`. If the agent answers anything else, the file is not loading: check the path, the import line, and that you started a fresh session.
 
+Also check which version you have. Run `grep -m1 'Version:'` on the installed file, or ask the agent for the version line of the global instruction file. See [Pin a version](#pin-a-version).
+
 ## Turn it off
 
-Say "normal mode" in a session to relax the style for that session. In long sessions the style can drift back, since the rules reload into context every turn; repeat the phrase if it does.
+Say "normal mode" in a session to relax the style for that session. The rules file stays in context for the whole session, and Claude Code reads `CLAUDE.md` again after a compaction, so in long sessions the style can drift back. Repeat the phrase if it does.
 
-To uninstall: remove the `@ADHD-STE.md` line from `~/.claude/CLAUDE.md` and delete the rules file (Claude Code), remove the ADHD-STE section from `~/.codex/AGENTS.md` (Codex), or remove the `instructions` entry (opencode). Then start a new session.
+To uninstall: remove the `@ADHD-STE.md` line from `~/.claude/CLAUDE.md` and delete the rules file (Claude Code), or remove the ADHD-STE section from the Codex file that holds it (Codex): `~/.codex/AGENTS.md`, or `~/.codex/AGENTS.override.md` if you installed into the override. Then start a new session.
 
 ## Repository layout
 
 ```text
-ADHD-STE.md                 the config; the only file a harness needs
-results/RESULTS.md          the 2x2 test (ADHD-STE on/off × Concise on/off), n=3 per cell
-results/before-after.html   side-by-side view of one before/after pair
-scripts/run-matrix.sh       reruns the 2x2 on your machine with Claude Code
-scripts/summarize.py        turns the run output into the results table
+ADHD-STE.md                   the config; the only file a harness needs
+THIRD-PARTY-NOTICES.md        upstream license notice and the status of each source
+results/RESULTS.md            the 2x2 length tests (ADHD-STE on/off x Concise on/off) and the quality eval
+results/before-after.html     side-by-side view of one before/after pair
+scripts/run-matrix.sh         reruns the 2x2 length test on your machine with Claude Code
+scripts/summarize.py          turns the run output into the results table
+scripts/ste-lint.py           counts language-rule violations in answers or files
+scripts/run-quality-eval.sh   runs the upstream i-have-adhd quality eval on this file
 ```
 
 ## Reproduce the test
 
-Requires the `claude` CLI, `jq`, and Python 3, with the config already installed for Claude Code. The script swaps your `~/.claude/CLAUDE.md` between cells and restores it on exit, so close other Claude Code sessions first.
+The test has four cells: `ADHD-STE.md` on or off, and the Concise output style on or off.
+
+Requires the `claude` CLI, `jq`, and Python 3. The script tests the `ADHD-STE.md` in this checkout, not your installed copy, and it does not write to `~/.claude`. Each run starts in an empty directory under `~/.cache/adhd-ste` without your user settings, hooks, plugins, or `CLAUDE.md`.
 
 ```bash
-scripts/run-matrix.sh 3          # 3 replicates per cell, 12 runs, roughly $8 and 10 minutes
-python3 scripts/summarize.py runs/
+CHECK_ONLY=1 scripts/run-matrix.sh   # two small calls: checks that the rules load in the "on" cells only
+scripts/run-matrix.sh 3              # 3 replicates per cell, 12 runs; the November run cost $4.37
 ```
+
+Each run goes to a new directory, `runs/<UTC timestamp>-<process id>`, and the script prints the path. Give that path to the two report scripts:
+
+```bash
+python3 scripts/summarize.py runs/<run directory>
+python3 scripts/ste-lint.py runs/<run directory>    # sentence length, tenses, and verb list per cell
+```
+
+The script refuses a directory that already holds runs, so old replicates cannot mix with new ones. It lists every run in `manifest.json`, moves the output of a failed run to `failed/`, and the report scripts count only the runs that the manifest marks as good.
+
+The model defaults to `claude-fable-5-2`. Set `MODEL` to change it. The script writes the model, the CLI version, and a hash of the rules file to `meta.json` in the run directory, and it exits with an error when a run fails. If you set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY`, the runs use a separate config directory and nothing of your own config loads. The header of the script describes the modes.
 
 To test a different prompt, edit `scripts/prompt.txt`.
 
+### Quality, not only length
+
+The length test cannot tell a shorter answer from a worse one. `scripts/run-quality-eval.sh` runs the eval harness of i-have-adhd (14 cases, a blind judge, a scoring rubric) with three conditions: no rules, this file, and the upstream skill alone. It needs Python 3.10 or later.
+
+```bash
+scripts/run-quality-eval.sh --plan   # prints the plan and the expected cost; no model calls
+scripts/run-quality-eval.sh          # asks before it spends
+```
+
+The script shows a maximum cost and asks for a typed "yes". The maximum is the sum of the budget caps it gives the CLI, with one attempt per call. The CLI can pass a cap by the cost of one request, so read the number as a close limit and not as an exact one. Each run writes to its own new directory under `runs/quality-eval/`. To resume a stopped run, pass its directory with `--out`; the script resumes only when the model, the rules file, the upstream commit, and the cases are the same.
+
+[`results/RESULTS.md`](results/RESULTS.md) has the result of one run. That run cost about $24 on claude-fable-5-2, four times the script's estimate, which comes from upstream's cost on an older model. Start with `--budget 10`.
+
 ## Contributing
 
-Changes to the rules go in `ADHD-STE.md`. Keep the attribution block at the top, and keep each rule traceable to one of the two upstream sources or mark it as new. If you change a rule, rerun the test and update `results/RESULTS.md`.
+Changes to the rules go in `ADHD-STE.md`. Keep the attribution block at the top, and keep each rule traceable to one of the two upstream sources or mark it as new. If you change a rule, raise the `Version:` line, rerun the test, and update `results/RESULTS.md`.
 
 ## License
 
-The repository's own files (README, scripts, results) are MIT, see [`LICENSE`](LICENSE). `ADHD-STE.md` carries its own attribution: the shape rules are MIT from ayghri, and the language rules derive from L1nefeed's gist, which states no license.
+The repository's own files (README, scripts, results) are MIT, see [`LICENSE`](LICENSE). `ADHD-STE.md` merges two upstream works, and [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) has the details. The shape rules come from ayghri's i-have-adhd under the MIT License. Its copyright and permission notice is in that file and at the end of `ADHD-STE.md`, so a single-file install carries it. The language rules derive from L1nefeed's gist, which states no license; they are used with attribution. ASD-STE100 is a copyrighted standard of ASD. This project paraphrases it and does not reproduce it.
 
-Last reviewed: 2026-08-29.
+Last reviewed: 2026-11-19.
