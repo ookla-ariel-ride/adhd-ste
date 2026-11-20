@@ -8,12 +8,13 @@
 # over i-have-adhd alone?
 #
 # Usage: scripts/run-quality-eval.sh [--plan] [--yes] [--trials N] [--budget USD]
-#                                    [--model MODEL] [--cases ID,ID] [--out DIR]
+#                                    [--model MODEL] [--judge-model MODEL] [--cases ID,ID] [--out DIR]
 #   --plan        print the plan and the expected cost; no model calls
 #   --yes         spend without the interactive confirmation
 #   --trials N    trials per case (default: 3)
 #   --budget USD  hard cap of the generation cost per condition (default: 5, max: 25)
 #   --model MODEL model for generation and judge (default: claude-fable-5-2)
+#   --judge-model MODEL  model for the judge only (default: the same as --model)
 #   --cases ID,ID  run only these upstream case ids (default: all cases)
 #   --out DIR     output directory (default: runs/quality-eval/<UTC timestamp>,
 #                 a new directory for each experiment; runs/ is gitignored)
@@ -57,7 +58,7 @@ RULES="$REPO/ADHD-STE.md"
 GEN_COST_PER_ROW=0.032
 JUDGE_COST_PER_GROUP=0.033
 
-ONLY=""; PLAN=0; YES=0; TRIALS=3; BUDGET=5; MODEL="${MODEL:-claude-fable-5-2}"; OUT=""
+ONLY=""; PLAN=0; YES=0; TRIALS=3; BUDGET=5; MODEL="${MODEL:-claude-fable-5-2}"; JUDGE_MODEL=""; OUT=""
 
 die() { echo "run-quality-eval: $*" >&2; exit 1; }
 
@@ -68,6 +69,7 @@ while [ $# -gt 0 ]; do
     --trials) TRIALS="${2:?--trials needs a value}"; shift ;;
     --budget) BUDGET="${2:?--budget needs a value}"; shift ;;
     --model) MODEL="${2:?--model needs a value}"; shift ;;
+    --judge-model) JUDGE_MODEL="${2:?--judge-model needs a value}"; shift ;;
     --cases) ONLY="${2:?--cases needs a value}"; shift ;;
     --out) OUT="${2:?--out needs a value}"; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -146,10 +148,11 @@ fi
 CANDIDATE="$SNAP_DIR/ADHD-STE.md"
 cp "$RULES" "$CANDIDATE"
 
-IDENTITY="$(jq -cnS --arg model "$MODEL" --argjson trials "$TRIALS" --arg upstream_sha "$UPSTREAM_SHA" \
+[ -n "$JUDGE_MODEL" ] || JUDGE_MODEL="$MODEL"
+IDENTITY="$(jq -cnS --arg model "$MODEL" --arg judge_model "$JUDGE_MODEL" --argjson trials "$TRIALS" --arg upstream_sha "$UPSTREAM_SHA" \
   --arg candidate_sha256 "$(sha "$CANDIDATE")" --arg comparator_sha256 "$(sha "$COMPARATOR")" \
   --arg cases_sha256 "$(sha "$CASES")" \
-  '{model:$model, trials:$trials, upstream_sha:$upstream_sha, candidate_sha256:$candidate_sha256,
+  '{model:$model, judge_model:$judge_model, trials:$trials, upstream_sha:$upstream_sha, candidate_sha256:$candidate_sha256,
     comparator_sha256:$comparator_sha256, cases_sha256:$cases_sha256}')"
 
 [ -n "$OUT" ] || OUT="$REPO/runs/quality-eval/$(date -u +%Y%m%dT%H%M%SZ)-$$"
@@ -168,7 +171,7 @@ RESUME=0
 if [ -e "$OUT" ]; then
   [ -d "$OUT" ] || die "$OUT exists and is not a directory"
   if [ -f "$OUT/meta.json" ]; then
-    RECORDED="$(jq -cS '{model, trials, upstream_sha, candidate_sha256, comparator_sha256, cases_sha256}' "$OUT/meta.json")" ||
+    RECORDED="$(jq -cS '{model, judge_model: (.judge_model // .model), trials, upstream_sha, candidate_sha256, comparator_sha256, cases_sha256}' "$OUT/meta.json")" ||
       die "$OUT/meta.json is not valid JSON. Use a new --out directory."
     if [ "$RECORDED" != "$IDENTITY" ]; then
       echo "run-quality-eval: $OUT holds a different experiment. Fields that differ (recorded -> now):" >&2
@@ -197,7 +200,7 @@ cat <<EOF
 Plan
   upstream     $UPSTREAM_REPO @ $UPSTREAM_SHA
   checkout     $UP
-  model        $MODEL (generation and judge), $(claude --version 2>/dev/null | head -1 || echo "claude CLI not found")
+  model        $MODEL (generation), $JUDGE_MODEL (judge), $(claude --version 2>/dev/null | head -1 || echo "claude CLI not found")
   conditions   baseline   = bare task prompt
                candidate  = $RULES
                comparator = $COMPARATOR
@@ -245,12 +248,12 @@ SCORES="$OUT/scores.jsonl"
 
 # Upstream's claude runner with the model replaced, and a judge runner that
 # adds a cost cap per call (judge.py has no budget option).
-jq --arg model "$MODEL" --arg cap "$JUDGE_CALL_BUDGET" '
+jq --arg model "$MODEL" --arg judge_model "$JUDGE_MODEL" --arg cap "$JUDGE_CALL_BUDGET" '
   (.claude.command | index("--model")) as $i
   | if $i == null then error("upstream claude runner has no --model") else . end
   | .claude.command[$i + 1] = $model
   | {claude: .claude,
-     "claude-judge": (.claude | del(.budget_flag) | .command = [.command[0], "--max-budget-usd", $cap] + .command[1:])}
+     "claude-judge": (.claude | del(.budget_flag) | .command[$i + 1] = $judge_model | .command = [.command[0], "--max-budget-usd", $cap] + .command[1:])}
 ' "$UP/evals/runners.example.json" > "$RUNNERS"
 
 # meta.json is the manifest of the experiment. A resume keeps the recorded one.
