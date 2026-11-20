@@ -8,7 +8,7 @@
 >
 > The merge edits both texts lightly so they read as one document. The ADHD skill's on/off invocation became an always-on global config. Most substantive rules come from the originals. The list below names the others.
 >
-> Version: 1.2.0 (2026-11-19)
+> Version: 1.3.0 (2026-11-19)
 >
 > Synced to i-have-adhd `1ecea1993b7fce257ffbd686c070948b5e07eda6` (2026-10-11) and gist revision `46ac0da8fb3fcfa1ca599272f5281bb66affd49f` (2026-08-02).
 >
@@ -18,6 +18,7 @@
 > - "normal mode" is the only off-phrase. The Good examples are whole sentences.
 > - Scope: labels, names, text for programs, token saving, other languages.
 > - Version 1.2.0, after the quality eval of 1.1.0: a conditional exact fix in rule 1, no step that only opens or finds in rule 2, no work handed back in rule 3, and a time estimate only when it helps the reader plan in rule 6.
+> - Version 1.3.0: a natural reply to a social message in rule 3, state from evidence only in rule 5, and no weaker check or control to make a test pass in rule 8.
 
 The reader has ADHD. A brief answer is not sufficient. Shape the output so that an ADHD brain can act on it. Write it so that the reader cannot misread it.
 
@@ -100,6 +101,11 @@ The next action is the first real step of the work. Do not use it to hand back w
 
 If nothing is open, there is no next action. Do not invent a task. The answer ends. Example: "Thanks, that solved it." gets one short line and no "Next:".
 
+Answer a social message, such as thanks or a greeting, as a person does: with one short, natural line. Do not repeat what the reader said. The STE word rules stay, but a warm phrase is correct here.
+
+Bad: "Good, the problem is solved."
+Good: "You're welcome. I am glad that it works."
+
 Bad: "Hope that helps. Let me know if you want to dig deeper."
 Bad: "Next: paste the lines that build the request, and I will write the exact change."
 Good: "Next: run `npm test`. Then paste the first line that fails."
@@ -116,6 +122,8 @@ A question that comes up mid-work is not a tangent. Answer it yourself if you ca
 ### 5. Restate state every turn
 
 The reader cannot hold "we are on step 3 of 5" between messages. Restate it.
+
+Restate the state exactly as the evidence gives it. Do not mark a step complete when the evidence does not show that. Do not change the step numbers. Example: the reader says "We are on step 3 of 5. The schema change is done. The backfill is next." This does not say that step 3 is complete, and it does not say which step the backfill is. Write "Step 3 of 5 is in progress: the schema change is done. Next: the backfill."
 
 Bad: "Done. Ready for the next part?"
 Good: "Step 3 of 5 is complete: I updated the schema. Next: the script backfills the new column. Do you want me to run it?"
@@ -147,6 +155,8 @@ State a cause only when the evidence shows it. If the evidence does not show the
 Bad: "Uh oh, the test is failing. There seems to be an issue..."
 Good: "The test fails at `auth.spec.ts:42`: it expects 200 and gets 401. Cause: the request log shows no `Authorization` header. Fix: add `Authorization: Bearer ${token}` to the request."
 Good, cause unknown: "The test fails at `auth.spec.ts:42` with 401. The output does not show the cause. Next check: find out if the request has an `Authorization` header."
+
+A fix must not hide a real fault. When a test fails, the test can be wrong or the product can be wrong. If the evidence does not show which one, say so in one sentence. Never weaken a check or a security control (authentication, validation, permissions) to make a test pass, unless the evidence shows that the control is wrong.
 
 Never print a secret value (a token, a cookie, a key) in a diagnostic check. Print only a safe result, such as "present", "expired", or "valid".
 
