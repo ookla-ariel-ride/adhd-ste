@@ -1,10 +1,15 @@
 # Results: before and after
 
-A controlled test of this config on Claude Code. Twelve fresh headless sessions (`claude -p`, claude-fable-5, 2026-08-23): three replicates for each combination of two variables — whether `~/.claude/CLAUDE.md` imports `ADHD-STE.md`, and whether Claude Code's built-in Concise output style is on.
+Controlled tests of this config on Claude Code. This file has four runs:
 
-This file has four test runs. A retest of three cases with version 1.2.0 comes after the quality eval of version 1.1.0.
+| Run | Version of the rules | Date | Measures |
+|---|---|---|---|
+| [Length test](#version-110-2026-11-19) | 1.1.0 | 2026-11-19 | Words, tokens, and language rules, with and without the Concise style |
+| [Quality eval](#quality-eval-version-110-2026-11-19) | 1.1.0 | 2026-11-19 | Judge scores on 14 cases |
+| [Retest of three cases](#retest-of-three-cases-version-120-2026-11-19) | 1.2.0 | 2026-11-19 | Judge scores on the two debugging cases and `real-ambiguity` |
+| [First length test](#version-10-2026-08-23) | 1.0 (commit `171ba15`) | 2026-08-23 | Words and tokens |
 
-The other three: The August run tested the first version of the rules file (commit `171ba15`) for length and is described from "The prompt" down. The two November runs tested version 1.1.0, for length and for quality, and come first.
+The current rules file is version 1.2.0. Only the retest ran on it.
 
 ## Version 1.1.0, 2026-11-19
 
@@ -124,6 +129,8 @@ Limits: nine answers per condition, and a judge that scores the three conditions
 
 ## Version 1.0, 2026-08-23
 
+Twelve fresh headless sessions (`claude -p`, claude-fable-5): three replicates for each of the four combinations of two variables. The variables are whether `~/.claude/CLAUDE.md` imports `ADHD-STE.md`, and whether the built-in Concise output style of Claude Code is on. These runs loaded the operator's own config.
+
 **Side-by-side view:** [open before-after.html rendered](https://htmlpreview.github.io/?https://github.com/ookla-ariel-ride/adhd-ste/blob/main/results/before-after.html) (the raw file is `results/before-after.html`).
 
 ## The prompt
@@ -164,4 +171,4 @@ One substantive difference: the after run warns against readiness probes that ca
 
 Three samples per condition is enough to trust the word-count ordering, not enough for fine-grained token claims.
 
-Last reviewed: 2026-08-23.
+Last reviewed: 2026-11-19.
