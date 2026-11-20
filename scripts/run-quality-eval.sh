@@ -8,14 +8,19 @@
 # over i-have-adhd alone?
 #
 # Usage: scripts/run-quality-eval.sh [--plan] [--yes] [--trials N] [--budget USD]
-#                                    [--model MODEL] [--judge-model MODEL] [--cases ID,ID] [--out DIR]
+#                                    [--model MODEL] [--judge-model MODEL | --judge-codex] [--cases ID,ID] [--cases-file PATH] [--out DIR]
 #   --plan        print the plan and the expected cost; no model calls
 #   --yes         spend without the interactive confirmation
 #   --trials N    trials per case (default: 3)
 #   --budget USD  hard cap of the generation cost per condition (default: 5, max: 25)
 #   --model MODEL model for generation and judge (default: claude-fable-5-2)
 #   --judge-model MODEL  model for the judge only (default: the same as --model)
-#   --cases ID,ID  run only these upstream case ids (default: all cases)
+#   --judge-codex  use the Codex CLI as the judge, with its default model. It has
+#                  no cost cap and reports no cost; it uses your Codex plan.
+#   --cases ID,ID  run only these case ids (default: all cases)
+#   --cases-file PATH  cases file in the upstream format (default: upstream's
+#                  evals/cases.jsonl); evals/heldout-cases.jsonl is a second set
+#                  that the rules file never saw
 #   --out DIR     output directory (default: runs/quality-eval/<UTC timestamp>,
 #                 a new directory for each experiment; runs/ is gitignored)
 #
@@ -24,6 +29,7 @@
 #   UPSTREAM_REPO      upstream git URL
 #   CACHE_DIR          where the upstream checkout lives (default: ~/.cache/adhd-ste)
 #   PYTHON             Python 3.10 or later; upstream does not run on 3.9
+#   COMPARATOR         rules file of the third condition (default: upstream SKILL.md)
 #   JUDGE_CALL_BUDGET  hard cap of one judge call in USD (default: 0.50)
 #
 # Limits of the upstream harness:
@@ -53,12 +59,12 @@ JUDGE_CALL_BUDGET="${JUDGE_CALL_BUDGET:-0.50}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 RULES="$REPO/ADHD-STE.md"
-# Costs per call that upstream recorded (evals/RESULTS.md, claude-opus-4-8):
-# $2.67 for 84 generation rows, $0.92 for 42 judge groups of two conditions.
-GEN_COST_PER_ROW=0.032
-JUDGE_COST_PER_GROUP=0.033
+# Costs per call that this project measured on claude-fable-5-2 in November 2026
+# (results/RESULTS.md): the mean of the three conditions, and one judge call.
+GEN_COST_PER_ROW=0.152
+JUDGE_COST_PER_GROUP=0.131
 
-ONLY=""; PLAN=0; YES=0; TRIALS=3; BUDGET=5; MODEL="${MODEL:-claude-fable-5-2}"; JUDGE_MODEL=""; OUT=""
+ONLY=""; PLAN=0; YES=0; TRIALS=3; BUDGET=5; MODEL="${MODEL:-claude-fable-5-2}"; JUDGE_MODEL=""; JUDGE_RUNNER=claude-judge; CASES_FILE=""; OUT=""
 
 die() { echo "run-quality-eval: $*" >&2; exit 1; }
 
@@ -70,6 +76,8 @@ while [ $# -gt 0 ]; do
     --budget) BUDGET="${2:?--budget needs a value}"; shift ;;
     --model) MODEL="${2:?--model needs a value}"; shift ;;
     --judge-model) JUDGE_MODEL="${2:?--judge-model needs a value}"; shift ;;
+    --judge-codex) JUDGE_RUNNER=codex; JUDGE_MODEL="codex-cli" ;;
+    --cases-file) CASES_FILE="${2:?--cases-file needs a value}"; shift ;;
     --cases) ONLY="${2:?--cases needs a value}"; shift ;;
     --out) OUT="${2:?--out needs a value}"; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -108,10 +116,12 @@ if [ "$(git -C "$UP" rev-parse HEAD 2>/dev/null || true)" != "$UPSTREAM_SHA" ]; 
   [ "$(git -C "$UP" rev-parse HEAD)" = "$UPSTREAM_SHA" ] || die "checkout of $UPSTREAM_SHA failed"
 fi
 [ -z "$(git -C "$UP" status --porcelain)" ] || die "$UP has local changes; remove the directory and run again"
-COMPARATOR="$UP/skills/i-have-adhd/SKILL.md"
+COMPARATOR="${COMPARATOR:-$UP/skills/i-have-adhd/SKILL.md}"
+case "$COMPARATOR" in /*) ;; *) COMPARATOR="$PWD/$COMPARATOR" ;; esac
 [ -f "$COMPARATOR" ] || die "$COMPARATOR not found in upstream"
 CASES="$UP/evals/cases.jsonl"
-[ -f "$CASES" ] || die "$CASES not found in upstream"
+if [ -n "$CASES_FILE" ]; then case "$CASES_FILE" in /*) CASES="$CASES_FILE" ;; *) CASES="$PWD/$CASES_FILE" ;; esac; fi
+[ -f "$CASES" ] || die "$CASES not found"
 
 sha() { if command -v shasum >/dev/null; then shasum -a 256 "$1"; else sha256sum "$1"; fi | cut -d' ' -f1; }
 
@@ -193,7 +203,8 @@ ROWS="$(run_evals plan --cases "$CASES" --trials "$TRIALS" --include-comparator 
 GROUPS_N=$((ROWS / 3))
 calc() { awk "BEGIN { printf \"%.2f\", $1 }"; }
 # A judge group here holds three responses, upstream's recorded cost is for two.
-EXPECTED="$(calc "$ROWS * $GEN_COST_PER_ROW + $GROUPS_N * $JUDGE_COST_PER_GROUP * 1.5")"
+if [ "$JUDGE_RUNNER" = codex ]; then JUDGE_EXPECTED=0; else JUDGE_EXPECTED="$(calc "$GROUPS_N * $JUDGE_COST_PER_GROUP")"; fi
+EXPECTED="$(calc "$ROWS * $GEN_COST_PER_ROW + $JUDGE_EXPECTED")"
 MAXIMUM="$(calc "3 * $BUDGET + $GROUPS_N * $JUDGE_CALL_BUDGET")"
 
 cat <<EOF
@@ -210,7 +221,7 @@ Plan
   output       $OUT/ (responses.jsonl, scores.jsonl, score.json, measure.json, meta.json)
                $([ "$RESUME" = 1 ] && echo "resume: meta.json there matches this experiment; finished calls do not repeat" || echo "new directory")
 Cost
-  expected     about \$$EXPECTED (from upstream's recorded cost per call on claude-opus-4-8; another model changes it)
+  expected     about \$$EXPECTED (from this project's measured cost per call on claude-fable-5-2; another model changes it. A Codex judge adds no Claude cost)
   maximum      \$$MAXIMUM for this invocation = 3 conditions x \$$BUDGET generation cap + $GROUPS_N judge calls x \$$JUDGE_CALL_BUDGET cap
                How it is computed: every permitted attempt at its cap. One attempt per call, so at most
                $ROWS generation calls (each capped at what is left of its condition's \$$BUDGET) and
@@ -252,7 +263,7 @@ jq --arg model "$MODEL" --arg judge_model "$JUDGE_MODEL" --arg cap "$JUDGE_CALL_
   (.claude.command | index("--model")) as $i
   | if $i == null then error("upstream claude runner has no --model") else . end
   | .claude.command[$i + 1] = $model
-  | {claude: .claude,
+  | {claude: .claude, codex: .codex,
      "claude-judge": (.claude | del(.budget_flag) | .command[$i + 1] = $judge_model | .command = [.command[0], "--max-budget-usd", $cap] + .command[1:])}
 ' "$UP/evals/runners.example.json" > "$RUNNERS"
 
@@ -281,7 +292,7 @@ run_condition candidate --condition-skill "$CANDIDATE"
 run_condition comparator --condition-skill "$COMPARATOR"
 
 echo "== judge"
-"$PY" "$UP/scripts/judge.py" --runner claude-judge --cases "$CASES" --runner-config "$RUNNERS" --responses "$RESPONSES" \
+"$PY" "$UP/scripts/judge.py" --runner "$JUDGE_RUNNER" --cases "$CASES" --runner-config "$RUNNERS" --responses "$RESPONSES" \
   --conditions baseline candidate comparator --retries 0 --output "$SCORES" ||
   die "judge stopped (status $?). To resume, run the same command again with --out $OUT"
 

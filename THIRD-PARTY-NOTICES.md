@@ -38,7 +38,7 @@ SOFTWARE.
 
 Source: https://gist.github.com/L1nefeed/4164ecaaf77879e76dca3c06f142f1c2
 
-Parts of `ADHD-STE.md` that derive from it: the sections "Word rules (STE)", "Grammar rules (STE)", "Sentence rules (STE)", "Structure rules (STE)" and "Examples (STE)", and the "Scope" section.
+Parts of `ADHD-STE.md` that derive from it: the sections "Word rules (STE)", "Grammar rules (STE)", "Sentence rules (STE)", "Structure rules (STE)" and "Examples (STE)", and the "Scope" section. In [`variants/ADHD-STE-lite.md`](variants/ADHD-STE-lite.md) the section "Language rules" is a short adaptation of the same text.
 
 The gist states no license. This project uses the text with attribution to its author. The author gave no explicit permission, and this project did not ask for one. The MIT License in `LICENSE` covers the repository's own files and makes no claim over this text.
 

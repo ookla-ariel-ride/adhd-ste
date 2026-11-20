@@ -80,7 +80,9 @@ for path in run_files(out):
         continue
     usage = d.get("usage")
     toks = usage.get("output_tokens") if isinstance(usage, dict) else None
-    cells.setdefault((m.group(1), m.group(2)), []).append((len(text.split()), len(text), toks))
+    details = usage.get("output_tokens_details") if isinstance(usage, dict) else None
+    think = details.get("thinking_tokens") if isinstance(details, dict) else None
+    cells.setdefault((m.group(1), m.group(2)), []).append((len(text.split()), len(text), toks, think))
 
 for path, why in skipped:
     print(f"skipped {path}: {why}", file=sys.stderr)
@@ -99,12 +101,12 @@ def fmt(vals):
     return f"{statistics.mean(vals):,.0f} ({min(vals):,}–{max(vals):,})"
 
 
-print("| ADHD-STE | Concise | n | Words | Characters | Output tokens (incl. hidden reasoning) |")
-print("|---|---|---:|---:|---:|---:|")
+print("| ADHD-STE | Concise | n | Words | Characters | Output tokens (incl. hidden reasoning) | Hidden reasoning tokens |")
+print("|---|---|---:|---:|---:|---:|---:|")
 for adhd in ("off", "on"):
     for concise in ("off", "on"):
         rows = cells.get((adhd, concise))
         if not rows:
             continue
-        words, chars, toks = zip(*rows)
-        print(f"| {adhd} | {concise} | {len(rows)} | {fmt(words)} | {fmt(chars)} | {fmt(toks)} |")
+        words, chars, toks, think = zip(*rows)
+        print(f"| {adhd} | {concise} | {len(rows)} | {fmt(words)} | {fmt(chars)} | {fmt(toks)} | {fmt(think)} |")

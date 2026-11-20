@@ -17,6 +17,8 @@
 #
 # Environment:
 #   MODEL            model for the paid runs (default: claude-fable-5-2)
+#   RULES            rules file to test (default: ADHD-STE.md of this checkout)
+#   CELLS            cells to run, as adhd:concise (default: "off:off off:on on:off on:on")
 #   EFFORT           optional effort level, passed as --effort (default: CLI default)
 #   JOBS             parallel runs (default: 3)
 #   AUTH_MODE        auto | isolated | project (default: auto), see below
@@ -50,7 +52,7 @@ JOBS="${JOBS:-3}"
 AUTH_MODE="${AUTH_MODE:-auto}"
 CHECK_MODEL="${CHECK_MODEL:-claude-haiku-5-5}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-RULES="$SCRIPT_DIR/../ADHD-STE.md"
+RULES="${RULES:-$SCRIPT_DIR/../ADHD-STE.md}"
 PROMPT_FILE="$SCRIPT_DIR/prompt.txt"
 CHECK_PROMPT='Your loaded instructions name one exact phrase that the reader says to turn the output style off for the session. Reply with only that phrase. Do not use tools. If no loaded instruction names such a phrase, reply NONE.'
 CHECK_PHRASE='normal mode'
@@ -296,14 +298,16 @@ run_cell() {
   done
 }
 
-run_cell off off
-run_cell off on
-run_cell on off
-run_cell on on
+CELLS="${CELLS:-off:off off:on on:off on:on}"
+NCELLS=0
+for cell in $CELLS; do
+  case "$cell" in off:off|off:on|on:off|on:on) ;; *) die "CELLS: bad cell '$cell' (use adhd:concise, for example on:off)";; esac
+  run_cell "${cell%%:*}" "${cell##*:}"; NCELLS=$((NCELLS + 1))
+done
 COMPLETE=true
 write_manifest
 
-total=$((4 * N))
+total=$((NCELLS * N))
 if [ "${#FAILED[@]}" -gt 0 ]; then
   echo "FAILED: ${#FAILED[@]} of $total runs. Output and stderr of each one are in $OUT/failed/; the reports skip them." >&2
   printf '  %s\n' "${FAILED[@]}" >&2
